@@ -1,0 +1,46 @@
+nodes:
+  Company:
+    properties: [name, sector, size, region, founded_year]
+  SubsidyProgram:
+    properties: [name, level, max_amount_eur, cofund_rate, deadline]
+  Authority:
+    properties: [name, country, url]
+  Document:
+    properties: [name, description]
+  EligibilityCriterion:
+    properties: [name, code, description]
+
+relations:
+  MANAGED_BY:
+    from: SubsidyProgram
+    to: Authority
+  APPLIES_TO_SECTOR:
+    from: SubsidyProgram
+    to: Company
+  APPLIES_TO_REGION:
+    from: SubsidyProgram
+    to: Company
+  REQUIRES_DOCUMENT:
+    from: SubsidyProgram
+    to: Document
+  ELIGIBLE_IF:
+    from: SubsidyProgram
+    to: EligibilityCriterion
+
+allowed_sectors:
+  - manufacturing
+  - software
+  - energy
+  - logistics
+
+allowed_regions:
+  - DE-NW
+  - DE-BE
+  - DE-BY
+  - DE-ST
+  - DE-HH
+
+allowed_sizes:
+  - micro
+  - small
+  - medium

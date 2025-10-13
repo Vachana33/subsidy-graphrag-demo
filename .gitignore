@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+env/
+.venv/
+venv/
+ENV/
+
+# macOS
+.DS_Store
+
+# Editor settings
+.vscode/
+.idea/
+
+# Logs and caches
+*.log
+.cache/
+*.egg-info/
+
+# Jupyter or Streamlit temp
+.ipynb_checkpoints/
+.streamlit/
+
+# Docker stuff (optional)
+*.pid
