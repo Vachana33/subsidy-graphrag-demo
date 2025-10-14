@@ -193,3 +193,99 @@ with tabs[1]:
 
 st.markdown("---")
 st.caption("Tip: Try “Which subsidies apply to small companies in NRW?”, “What documents are required?”, or “Who manages each program?”.")
+
+# ---------- Top-5 Recommender tab ----------
+rec_tab, = st.tabs(["Top-5 Recommender"])
+
+with rec_tab:
+    st.subheader("Recommend Top 5 Subsidies by Company Attributes")
+
+    # Basic pickers (match your ontology's allowed lists)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        sector = st.selectbox("Sector", ["manufacturing", "software", "energy", "logistics"], index=0)
+    with col2:
+        size = st.selectbox("Size", ["micro", "small", "medium"], index=1)
+    with col3:
+        region = st.selectbox("Region", ["DE-NW", "DE-BE", "DE-BY", "DE-ST", "DE-HH"], index=0)
+
+    # Optional ranking filters
+    col4, col5 = st.columns(2)
+    with col4:
+        min_amount = st.number_input("Min max_amount_eur", value=0, step=1000)
+    with col5:
+        min_cofund = st.slider("Min cofund_rate", 0.0, 1.0, 0.0, 0.05)
+
+    if st.button("Recommend"):
+        # 1) Do we have a company with these attributes?
+        exists_q = """
+        MATCH (c:Company {sector:$sector, size:$size, region:$region})
+        RETURN count(c) AS cnt
+        """
+        cnt = g.query(exists_q, {"sector": sector, "size": size, "region": region}).result_set[0][0]
+
+        if cnt > 0:
+            # Use eligibility edges from company to programs
+            rec_q = """
+            MATCH (c:Company {sector:$sector, size:$size, region:$region})
+                  <-[:APPLIES_TO_SECTOR|:APPLIES_TO_REGION]-(p:SubsidyProgram)
+            WHERE coalesce(p.max_amount_eur,0) >= $min_amount
+              AND coalesce(p.cofund_rate,0) >= $min_cofund
+            OPTIONAL MATCH (p)-[:MANAGED_BY]->(a:Authority)
+            OPTIONAL MATCH (p)-[:REQUIRES_DOCUMENT]->(d:Document)
+            RETURN p.name AS program,
+                   p.max_amount_eur AS max_eur,
+                   p.cofund_rate AS cofund,
+                   p.deadline AS deadline,
+                   a.name AS authority,
+                   collect(DISTINCT d.name) AS docs
+            ORDER BY max_eur DESC, cofund DESC
+            LIMIT 5
+            """
+            params = {"sector": sector, "size": size, "region": region,
+                      "min_amount": int(min_amount), "min_cofund": float(min_cofund)}
+            rows = g.query(rec_q, params).result_set
+            source_note = "Matched a Company with those attributes."
+        else:
+            # Fallback: rank programs globally (no company found with those attributes)
+            rec_q = """
+            MATCH (p:SubsidyProgram)
+            WHERE coalesce(p.max_amount_eur,0) >= $min_amount
+              AND coalesce(p.cofund_rate,0) >= $min_cofund
+            OPTIONAL MATCH (p)-[:MANAGED_BY]->(a:Authority)
+            OPTIONAL MATCH (p)-[:REQUIRES_DOCUMENT]->(d:Document)
+            RETURN p.name AS program,
+                   p.max_amount_eur AS max_eur,
+                   p.cofund_rate AS cofund,
+                   p.deadline AS deadline,
+                   a.name AS authority,
+                   collect(DISTINCT d.name) AS docs
+            ORDER BY max_eur DESC, cofund DESC
+            LIMIT 5
+            """
+            params = {"min_amount": int(min_amount), "min_cofund": float(min_cofund)}
+            rows = g.query(rec_q, params).result_set
+            source_note = "No Company matched those attributes — showing top programs overall."
+
+        if not rows:
+            st.warning("No programs matched your filters.")
+        else:
+            st.caption(source_note)
+            cols = ["program", "max_eur", "cofund", "deadline", "authority", "docs"]
+            table = []
+            for r in rows:
+                # r = [program, max_eur, cofund, deadline, authority, docs(list)]
+                table.append({
+                    "Program": r[0],
+                    "Max €": r[1],
+                    "Cofund": r[2],
+                    "Deadline": r[3],
+                    "Authority": r[4],
+                    "Documents": ", ".join(r[5]) if isinstance(r[5], (list, tuple)) else r[5],
+                })
+            st.success(f"Top {len(table)} result(s)")
+            st.dataframe(table, use_container_width=True)
+
+            # Tiny helper: show the actual Cypher we used
+            with st.expander("Show Cypher"):
+                st.code(rec_q, language="cypher")

@@ -1,0 +1,3 @@
+FalkorDB
+langchain-falkordb   # only if you import it
+redis                # usually pulled in by FalkorDB, but safe to include

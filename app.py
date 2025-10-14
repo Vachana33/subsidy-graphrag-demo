@@ -50,6 +50,16 @@ merge_node("Company", {"name":"ACME Maschinenbau GmbH","sector":"manufacturing",
 merge_node("Authority", {"name":"BMWK","country":"DE","url":"https://www.bmwk.de"})
 merge_node("Authority", {"name":"KfW","country":"DE","url":"https://www.kfw.de"})
 
+merge_node("Company", {"name":"TemplateSoftBY","sector":"software","size":"medium","region":"DE-BY","founded_year":2020})
+merge_node("Company", {"name":"TemplateEnergyBE","sector":"energy","size":"small","region":"DE-BE","founded_year":2019})
+
+# Link some programs to templates (demo)
+merge_edge("APPLIES_TO_SECTOR","SubsidyProgram","KMU Innovationsgutschein","Company","TemplateSoftBY")
+merge_edge("APPLIES_TO_REGION","SubsidyProgram","KMU Innovationsgutschein","Company","TemplateSoftBY")
+
+merge_edge("APPLIES_TO_SECTOR","SubsidyProgram","Energieeffizienz Plus","Company","TemplateEnergyBE")
+merge_edge("APPLIES_TO_REGION","SubsidyProgram","Energieeffizienz Plus","Company","TemplateEnergyBE")
+
 for n,d in [("Business Plan","Kurzbeschreibung"),
             ("Financial Statements","Bilanzen/GuV 2 Jahre"),
             ("Company Registration","Handelsregisterauszug"),
@@ -110,7 +120,7 @@ ORDER BY program
 
 run("""
 MATCH (:Company {name:'ACME Maschinenbau GmbH'})
-      <-[:APPLIES_TO_SECTOR|:APPLIES_TO_REGION]-(p:SubsidyProgram)
+    <-[:APPLIES_TO_SECTOR|:APPLIES_TO_REGION]-(p:SubsidyProgram)
 OPTIONAL MATCH (p)-[:REQUIRES_DOCUMENT]->(d:Document)
 OPTIONAL MATCH (p)-[:MANAGED_BY]->(a:Authority)
 RETURN p.name AS program, a.name AS authority, collect(DISTINCT d.name) AS docs
