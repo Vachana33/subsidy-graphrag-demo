@@ -1,29 +1,49 @@
 nodes:
   Company:
     properties: [name, sector, size, region, founded_year]
+
   SubsidyProgram:
     properties: [name, level, max_amount_eur, cofund_rate, deadline]
+
   Authority:
     properties: [name, country, url]
+
   Document:
     properties: [name, description]
+
   EligibilityCriterion:
     properties: [name, code, description]
+
+  SourceDoc:
+    properties: [id, title, url, ingest_ts]  # provenance
 
 relations:
   MANAGED_BY:
     from: SubsidyProgram
     to: Authority
+
   APPLIES_TO_SECTOR:
     from: SubsidyProgram
     to: Company
+
   APPLIES_TO_REGION:
     from: SubsidyProgram
     to: Company
+
   REQUIRES_DOCUMENT:
     from: SubsidyProgram
     to: Document
+
   ELIGIBLE_IF:
+    from: SubsidyProgram
+    to: EligibilityCriterion
+
+  EXTRACTED_FROM:
+    from: SubsidyProgram
+    to: SourceDoc
+    properties: [confidence]  # provenance confidence
+
+  HAS_CRITERION:   # optional alias; keep only if you actually use it
     from: SubsidyProgram
     to: EligibilityCriterion
 
@@ -44,3 +64,4 @@ allowed_sizes:
   - micro
   - small
   - medium
+  - large

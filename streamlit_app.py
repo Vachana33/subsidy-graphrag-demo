@@ -1,15 +1,28 @@
-import os, tempfile
+# streamlit_app.py
+import os, json, tempfile, textwrap
 import streamlit as st
 from falkordb import FalkorDB
-from pyvis.network import Network
-from nl2cypher import generate_cypher
+from nl2cypher import generate_cypher, top5_by_max_amount
+
+# Optional imports that shouldn't crash the app if missing
+try:
+    from pyvis.network import Network
+    HAS_PYVIS = True
+except Exception:
+    HAS_PYVIS = False
+
+try:
+    from agent import make_agent
+except Exception as e:
+    make_agent = None
+    _agent_import_err = e
 
 st.set_page_config(page_title="Subsidy GraphRAG", layout="wide")
-st.title("Subsidy GraphRAG — NL → Cypher → Results + Graph")
+st.title("Subsidy GraphRAG")
 
-# ---------- DB connection ----------
+# ---------- DB connection (cached) ----------
 @st.cache_resource
-def get_graph(host: str, port: int, graph_name: str):
+def get_graph_cached(host: str, port: int, graph_name: str):
     db = FalkorDB(host=host, port=port)
     return db.select_graph(graph_name)
 
@@ -18,7 +31,7 @@ with st.sidebar:
     host = st.text_input("Host", "localhost")
     port = st.number_input("Port", 6379, step=1)
     graph_name = st.text_input("Graph", "subsidy_demo")
-    g = get_graph(host, port, graph_name)
+    g = get_graph_cached(host, int(port), graph_name)
 
     st.header("LLM Provider")
     provider = st.selectbox("Choose", ["Rules", "OpenAI", "Ollama"], index=0)
@@ -29,10 +42,13 @@ with st.sidebar:
     else:
         ollama_model = None
 
-tabs = st.tabs(["Ask & Results", "Graph"])
+# One unified tabs row
+tab_ask, tab_graph, tab_rec, tab_agent = st.tabs(
+    ["Ask & Results", "Graph", "Top-5 Recommender", "Agent"]
+)
 
 # ---------- Ask & Results ----------
-with tabs[0]:
+with tab_ask:
     st.subheader("Ask a question")
     default_q = "Which subsidies apply to small companies in NRW?"
     user_q = st.text_input("Natural language question", value=default_q)
@@ -47,7 +63,11 @@ with tabs[0]:
 
     if go:
         with st.spinner("Generating Cypher..."):
-            cypher = generate_cypher(user_q, provider=provider, ollama_model=(ollama_model or "llama3.1"))
+            cypher = generate_cypher(
+                user_q,
+                provider=provider,
+                ollama_model=(ollama_model or "llama3.1"),
+            )
         st.code(cypher, language="cypher")
 
         with st.spinner("Running on FalkorDB..."):
@@ -59,15 +79,15 @@ with tabs[0]:
             if not rows:
                 st.warning("No rows returned.")
             else:
-                # try to infer headers from RETURN aliases
+                # infer headers from RETURN aliases where possible
                 cols = [f"col_{i}" for i in range(len(rows[0]))]
                 try:
                     upper = cypher.upper()
                     if "RETURN" in upper:
-                        rp = upper.split("RETURN",1)[1]
+                        rp = upper.split("RETURN", 1)[1]
                         rp = rp.split("ORDER BY")[0] if "ORDER BY" in rp else rp
                         headers = [h.strip() for h in rp.split(",")]
-                        parsed = [(h.split(" AS ",1)[1].strip() if " AS " in h else h) for h in headers]
+                        parsed = [(h.split(" AS ", 1)[1].strip() if " AS " in h else h) for h in headers]
                         if len(parsed) == len(rows[0]): cols = parsed
                 except Exception:
                     pass
@@ -75,8 +95,10 @@ with tabs[0]:
                 st.dataframe([dict(zip(cols, r)) for r in rows], use_container_width=True)
 
 # ---------- Graph tab ----------
-with tabs[1]:
+with tab_graph:
     st.subheader("Graph visualization")
+    if not HAS_PYVIS:
+        st.info("Install pyvis to enable the interactive graph: `pip install pyvis`")
     vis_mode = st.selectbox(
         "Choose subgraph",
         ["ACME neighborhood (Company ↔ Programs ↔ Docs/Authority)",
@@ -95,9 +117,7 @@ with tabs[1]:
         }.get(label, "#999999")
 
     def normalize_node(ent):
-        """Return (name, label) for any node-like object/dict."""
         label, name = "Node", None
-        # labels
         if hasattr(ent, "label"):
             try:
                 label = ent.label if not callable(ent.label) else ent.label()
@@ -113,7 +133,6 @@ with tabs[1]:
             labs = ent.get("labels") or ent.get("label")
             if labs:
                 label = list(labs)[0] if isinstance(labs, (list, tuple, set)) else str(labs)
-        # properties
         props = None
         if hasattr(ent, "properties"):
             props = ent.properties
@@ -126,7 +145,6 @@ with tabs[1]:
         return str(name), str(label)
 
     def normalize_rel(ent):
-        """Return relationship type string if available."""
         if hasattr(ent, "type"):
             try:
                 t = ent.type if not callable(ent.type) else ent.type()
@@ -143,7 +161,7 @@ with tabs[1]:
             return str(ent.get("type") or ent.get("relationshipType") or "REL")
         return "REL"
 
-    if build:
+    if build and HAS_PYVIS:
         if vis_mode.startswith("ACME"):
             vis_query = """
             MATCH (c:Company {name:'ACME Maschinenbau GmbH'})-[r1]-(p:SubsidyProgram)
@@ -187,20 +205,12 @@ with tabs[1]:
 
         with tempfile.TemporaryDirectory() as td:
             html_path = os.path.join(td, "graph.html")
-            # IMPORTANT: use write_html (works in Streamlit)
             net.write_html(html_path, open_browser=False, notebook=False)
             st.components.v1.html(open(html_path, "r", encoding="utf-8").read(), height=680, scrolling=True)
 
-st.markdown("---")
-st.caption("Tip: Try “Which subsidies apply to small companies in NRW?”, “What documents are required?”, or “Who manages each program?”.")
-
-# ---------- Top-5 Recommender tab ----------
-rec_tab, = st.tabs(["Top-5 Recommender"])
-
-with rec_tab:
+# ---------- Top-5 Recommender ----------
+with tab_rec:
     st.subheader("Recommend Top 5 Subsidies by Company Attributes")
-
-    # Basic pickers (match your ontology's allowed lists)
     col1, col2, col3 = st.columns(3)
     with col1:
         sector = st.selectbox("Sector", ["manufacturing", "software", "energy", "logistics"], index=0)
@@ -209,7 +219,6 @@ with rec_tab:
     with col3:
         region = st.selectbox("Region", ["DE-NW", "DE-BE", "DE-BY", "DE-ST", "DE-HH"], index=0)
 
-    # Optional ranking filters
     col4, col5 = st.columns(2)
     with col4:
         min_amount = st.number_input("Min max_amount_eur", value=0, step=1000)
@@ -217,7 +226,6 @@ with rec_tab:
         min_cofund = st.slider("Min cofund_rate", 0.0, 1.0, 0.0, 0.05)
 
     if st.button("Recommend"):
-        # 1) Do we have a company with these attributes?
         exists_q = """
         MATCH (c:Company {sector:$sector, size:$size, region:$region})
         RETURN count(c) AS cnt
@@ -225,7 +233,6 @@ with rec_tab:
         cnt = g.query(exists_q, {"sector": sector, "size": size, "region": region}).result_set[0][0]
 
         if cnt > 0:
-            # Use eligibility edges from company to programs
             rec_q = """
             MATCH (c:Company {sector:$sector, size:$size, region:$region})
                   <-[:APPLIES_TO_SECTOR|:APPLIES_TO_REGION]-(p:SubsidyProgram)
@@ -233,12 +240,8 @@ with rec_tab:
               AND coalesce(p.cofund_rate,0) >= $min_cofund
             OPTIONAL MATCH (p)-[:MANAGED_BY]->(a:Authority)
             OPTIONAL MATCH (p)-[:REQUIRES_DOCUMENT]->(d:Document)
-            RETURN p.name AS program,
-                   p.max_amount_eur AS max_eur,
-                   p.cofund_rate AS cofund,
-                   p.deadline AS deadline,
-                   a.name AS authority,
-                   collect(DISTINCT d.name) AS docs
+            RETURN p.name AS program, p.max_amount_eur AS max_eur, p.cofund_rate AS cofund,
+                   p.deadline AS deadline, a.name AS authority, collect(DISTINCT d.name) AS docs
             ORDER BY max_eur DESC, cofund DESC
             LIMIT 5
             """
@@ -247,19 +250,14 @@ with rec_tab:
             rows = g.query(rec_q, params).result_set
             source_note = "Matched a Company with those attributes."
         else:
-            # Fallback: rank programs globally (no company found with those attributes)
             rec_q = """
             MATCH (p:SubsidyProgram)
             WHERE coalesce(p.max_amount_eur,0) >= $min_amount
               AND coalesce(p.cofund_rate,0) >= $min_cofund
             OPTIONAL MATCH (p)-[:MANAGED_BY]->(a:Authority)
             OPTIONAL MATCH (p)-[:REQUIRES_DOCUMENT]->(d:Document)
-            RETURN p.name AS program,
-                   p.max_amount_eur AS max_eur,
-                   p.cofund_rate AS cofund,
-                   p.deadline AS deadline,
-                   a.name AS authority,
-                   collect(DISTINCT d.name) AS docs
+            RETURN p.name AS program, p.max_amount_eur AS max_eur, p.cofund_rate AS cofund,
+                   p.deadline AS deadline, a.name AS authority, collect(DISTINCT d.name) AS docs
             ORDER BY max_eur DESC, cofund DESC
             LIMIT 5
             """
@@ -271,10 +269,8 @@ with rec_tab:
             st.warning("No programs matched your filters.")
         else:
             st.caption(source_note)
-            cols = ["program", "max_eur", "cofund", "deadline", "authority", "docs"]
             table = []
             for r in rows:
-                # r = [program, max_eur, cofund, deadline, authority, docs(list)]
                 table.append({
                     "Program": r[0],
                     "Max €": r[1],
@@ -285,7 +281,38 @@ with rec_tab:
                 })
             st.success(f"Top {len(table)} result(s)")
             st.dataframe(table, use_container_width=True)
-
-            # Tiny helper: show the actual Cypher we used
             with st.expander("Show Cypher"):
                 st.code(rec_q, language="cypher")
+
+# ---------- Agent ----------
+with tab_agent:
+    st.subheader("Agent")
+    st.caption("Ask in natural language; the agent will plan tool calls (Cypher/upserts) and show traces.")
+    if make_agent is None:
+        st.warning(f"Agent module not available: {_agent_import_err if '_agent_import_err' in globals() else 'create agent.py'}")
+    if 'agent' not in st.session_state and make_agent is not None:
+        try:
+            st.session_state.agent = make_agent()
+            st.success("Agent ready.")
+        except Exception as e:
+            st.error(f"Agent init failed: {e}")
+
+    user_q = st.text_area("Your query", "List the top 5 programs by max amount.")
+    colA, colB = st.columns([1,1])
+    with colA:
+        run = st.button("Run Agent")
+    with colB:
+        if st.button("Show example Cypher"):
+            st.code(top5_by_max_amount(), language="cypher")
+
+    if run and 'agent' in st.session_state:
+        with st.spinner("Thinking..."):
+            try:
+                resp = st.session_state.agent.run(user_q)
+                st.success("Response")
+                st.write(resp)
+            except Exception as e:
+                st.error(f"Agent error: {e}")
+
+st.markdown("---")
+st.caption("Tip: Try “Which subsidies apply to small companies in NRW?”, “What documents are required?”, or “Who manages each program?”.")

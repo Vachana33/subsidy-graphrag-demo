@@ -139,3 +139,18 @@ def generate_cypher(user_q: str, provider: str = "Rules", ollama_model: str = "l
     if p == "ollama":
         return generate_with_ollama(user_q, model=ollama_model)
     return generate_with_rules(user_q)
+
+# nl2cypher.py
+def top5_by_max_amount():
+    return """
+    MATCH (p:SubsidyProgram)
+    RETURN p.name AS program, p.max_amount_eur AS max_amount, p.cofund_rate AS rate
+    ORDER BY max_amount DESC NULLS LAST
+    LIMIT 5
+    """
+def programs_by_authority(auth_name: str):
+    return f"""
+    MATCH (p:SubsidyProgram)-[:MANAGED_BY]->(a:Authority {{name:$auth}})
+    RETURN p.name AS program, coalesce(p.max_amount_eur,0) AS max_amount
+    ORDER BY max_amount DESC
+    """
