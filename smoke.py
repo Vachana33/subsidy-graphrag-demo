@@ -18,3 +18,12 @@ RETURN a.name, b.name
 """).result_set
 
 print("Result:", rs)
+
+# smoke.py
+from app import get_graph, seed_minimal
+
+if __name__ == "__main__":
+    print(seed_minimal())
+    g = get_graph()
+    rs = g.query("MATCH (p:SubsidyProgram) RETURN p.name, p.max_amount_eur").result_set
+    print("Programs:", rs)
