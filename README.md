@@ -1,5 +1,3 @@
-Perfect 💪 — you’ve now got a fully working **Graph-RAG prototype for subsidy intelligence**, so here’s your polished **README.md** written in the same structured, visual style as your DME project:
-
 🧭 Subsidy GraphRAG Demo (FalkorDB + Streamlit + LLMs)
 ======================================================
 
