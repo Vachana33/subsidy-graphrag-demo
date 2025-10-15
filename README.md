@@ -31,7 +31,13 @@ subsidy-graphrag/
 │
 ├── ingest.py                 # (Planned) PDF → Graph ingestion pipeline
 ├── agent_tools.py            # (Planned) LangChain tools for Cypher + inserts
-├──
+├── agent.py                  # (Planned) Agent using LLM + tool-calling
+│
+├── requirements.txt          # Python dependencies
+├── .gitignore
+└── README.md                 # 📄 This file
+
+
 ```
 
 ## 🚀 Quick Start
